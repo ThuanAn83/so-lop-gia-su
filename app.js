@@ -38,7 +38,7 @@ let me=null;
 const PARENT_DOMAIN="@phuhuynh.solop.local";
 function normPhone(p){return String(p||"").replace(/\D/g,"").replace(/^84/,"0")}
 
-function att2model(rows){const m={};rows.forEach(a=>{m[a.student_id]={st:a.status==="e"?"u":a.status,done:a.done||[],fee:a.fee,cmt:a.comment||""}});return m}
+function att2model(rows){const m={};rows.forEach(a=>{m[a.student_id]={st:a.status==="e"?"u":a.status,done:a.done||[],checkedOn:a.checked_on||"",fee:a.fee,cmt:a.comment||""}});return m}
 async function loadAll(){
   const q=t=>sb.from(t).select("*");
   const res=await Promise.all([q("students"),q("groups"),q("group_members"),q("lessons"),q("attendance"),q("payments"),q("settings")]);
@@ -72,7 +72,7 @@ async function persist(coll,id,data,prev){
     const keep=Object.keys(data.attendance||{});
     const gone=Object.keys((prev&&prev.attendance)||{}).filter(x=>!keep.includes(x));
     if(gone.length)chk(await sb.from("attendance").delete().eq("lesson_id",id).in("student_id",gone));
-    if(keep.length)chk(await sb.from("attendance").upsert(keep.map(sid=>{const r=data.attendance[sid];return {lesson_id:id,student_id:sid,status:r.st,done:r.done||[],fee:Math.round(r.fee||0),comment:r.cmt||""}})));
+    if(keep.length)chk(await sb.from("attendance").upsert(keep.map(sid=>{const r=data.attendance[sid];return {lesson_id:id,student_id:sid,status:r.st,done:r.done||[],checked_on:r.checkedOn||null,fee:Math.round(r.fee||0),comment:r.cmt||""}})));
   }else if(coll==="payments"){
     chk(await sb.from("payments").upsert({student_id:data.studentId,month:data.month,paid:!!data.paid,amount:Math.round(data.amount||0),paid_date:data.paidDate||null}));
   }
@@ -363,7 +363,41 @@ function renderFeesYear(){
 
 
 /* ---------- buổi học ---------- */
-let editingLesson=null, draftAtt={}, draftHw=[];
+let editingLesson=null, draftAtt={}, draftHw=[], draftCheck=null, checkedHere="";
+function dm(ds){const d=new Date(ds+"T00:00:00");return d.getDate()+"/"+(d.getMonth()+1)}
+// Các buổi trước của cùng lớp có giao bài tập về nhà
+function hwLessonsBefore(gid,date){
+  if(!gid||!date)return [];
+  return Object.entries(S.lessons).filter(([id,l])=>id!==editingLesson&&l.groupId===gid&&l.date&&l.date<date&&(l.hwItems||[]).length)
+    .sort((a,b)=>(b[1].date+(b[1].time||"")).localeCompare(a[1].date+(a[1].time||""))).map(([id,l])=>({id,...l}));
+}
+function setCheck(lid){
+  const l=lid&&S.lessons[lid];
+  draftCheck=l?{id:lid,done:Object.fromEntries(Object.entries(l.attendance||{}).map(([sid,r])=>[sid,[...(r.done||[])]]))}:null;
+}
+function renderCheckSelect(keep){
+  const gid=$("#lClass").value,date=$("#lDate").value,ls=hwLessonsBefore(gid,date);
+  $("#hwCheckBox").hidden=!gid;
+  let cur=keep&&draftCheck&&ls.some(l=>l.id===draftCheck.id)?draftCheck.id:"";
+  $("#lCheck").innerHTML=`<option value="">Không kiểm tra bài hôm nay</option>`+ls.map(l=>`<option value="${esc(l.id)}" ${l.id===cur?"selected":""}>Ngày ${dm(l.date)} – ${esc(l.hwItems.map((h,i)=>h.title||"Bài "+(i+1)).join(", "))}</option>`).join("");
+  if(!cur)draftCheck=null;
+  renderCheck();
+}
+function renderCheck(){
+  const L=$("#checkList");
+  if(!draftCheck){$("#lCheckHint").textContent=$("#lClass").value&&!hwLessonsBefore($("#lClass").value,$("#lDate").value).length?"Lớp này chưa có buổi nào trước đó giao bài tập về nhà.":"";L.innerHTML="";return}
+  const l=S.lessons[draftCheck.id],items=l.hwItems||[];
+  const list=studentsArr().filter(s=>(l.attendance||{})[s.id]&&draftAtt[s.id]&&draftAtt[s.id].st==="p");
+  $("#lCheckHint").textContent="Tick bài em đã làm xong. Phụ huynh sẽ thấy hôm nay bạn đã kiểm tra bài này.";
+  L.innerHTML=list.length?list.map(s=>{const d=draftCheck.done[s.id]||[];return `<div class="att-row"><div class="who">${esc(s.name)}</div>
+    <div class="hw">${items.map((h,i)=>`<label class="check"><input type="checkbox" data-done="${esc(s.id)}" data-item="${esc(h.id)}" ${d.includes(h.id)?"checked":""}> ${esc(h.title||"Bài "+(i+1))}</label>`).join("")}<button type="button" class="ghost small" data-doneall="${esc(s.id)}">Tất cả</button></div></div>`}).join(""):`<div class="hint">Chưa có em nào vừa có mặt hôm nay vừa được giao bài ngày ${dm(l.date)}.</div>`;
+  L.querySelectorAll("[data-done]").forEach(i=>i.onchange=()=>{
+    const sid=i.dataset.done,set=new Set(draftCheck.done[sid]||[]);
+    if(i.checked)set.add(i.dataset.item);else set.delete(i.dataset.item);draftCheck.done[sid]=[...set];
+  });
+  L.querySelectorAll("[data-doneall]").forEach(b=>b.onclick=()=>{draftCheck.done[b.dataset.doneall]=items.map(h=>h.id);renderCheck()});
+}
+$("#lCheck").onchange=()=>{setCheck($("#lCheck").value);renderCheck()};
 function openLesson(id,presetGroup){
   editingLesson=id;
   const l=id?S.lessons[id]:null;
@@ -384,7 +418,10 @@ function openLesson(id,presetGroup){
   if(!l)defaultAtt();
   $("#lDelete").hidden=!l;
   $("#lDelete").classList.remove("armed");$("#lDelete").textContent="Xóa buổi học";
-  renderAtt();
+  checkedHere="";
+  if(l)for(const [lid,x] of Object.entries(S.lessons))if(lid!==id&&x.groupId===l.groupId&&Object.values(x.attendance||{}).some(r=>r.checkedOn===l.date)){checkedHere=lid;break}
+  setCheck(checkedHere);
+  renderAtt();renderCheckSelect(true);
   $("#dLesson").showModal();
 }
 function inClass(s,gid){return !gid||inGroup(s.id,gid)}
@@ -404,27 +441,22 @@ function renderAtt(){
     const r=draftAtt[s.id];const st=r?r.st:"n";
     return `<div class="att-row"><div class="who">${esc(s.name)}<small>${esc(groupsOf(s.id).map(g=>g.name).join(", "))}</small></div>
       <div class="seg" role="radiogroup" aria-label="Điểm danh ${esc(s.name)}">${opts.map(([v,t])=>`<label><input type="radio" name="att-${esc(s.id)}" value="${v}" data-sid="${esc(s.id)}" ${st===v?"checked":""}><span>${t}</span></label>`).join("")}</div>
-      ${r&&r.st!=="n"&&draftHw.length?`<div class="hw"><span class="lbl">Đã làm xong:</span>${draftHw.map((h,i)=>`<label class="check" title="${esc(h.title||"Bài "+(i+1))}"><input type="checkbox" data-done="${esc(s.id)}" data-item="${esc(h.id)}" ${(r.done||[]).includes(h.id)?"checked":""}> Bài ${i+1}</label>`).join("")}<button type="button" class="ghost small" data-doneall="${esc(s.id)}">Tất cả</button></div>`:""}
       ${r&&r.st!=="n"?`<div class="cmt"><input type="text" data-cmt="${esc(s.id)}" value="${esc(r.cmt||"")}" placeholder="Nhận xét riêng cho ${esc(s.name)} (phụ huynh em này sẽ thấy)" aria-label="Nhận xét cho ${esc(s.name)}"></div>`:""}
     </div>`}).join(""):`<div class="empty" style="border:0">Chưa có học sinh nào. Thêm học sinh ở tab “Học sinh” trước nhé.</div>`;
   $("#attList").querySelectorAll("input[type=radio]").forEach(i=>i.onchange=()=>{
     const sid=i.dataset.sid;
     if(i.value==="n")delete draftAtt[sid];else draftAtt[sid]={...(draftAtt[sid]||{hw:false}),st:i.value};
-    renderAtt();
-  });
-  $("#attList").querySelectorAll("[data-done]").forEach(i=>i.onchange=()=>{
-    const r=draftAtt[i.dataset.done];const set=new Set(r.done||[]);
-    if(i.checked)set.add(i.dataset.item);else set.delete(i.dataset.item);r.done=[...set];
+    renderAtt();renderCheck();
   });
   $("#attList").querySelectorAll("[data-cmt]").forEach(i=>i.oninput=()=>{draftAtt[i.dataset.cmt].cmt=i.value});
-  $("#attList").querySelectorAll("[data-doneall]").forEach(b=>b.onclick=()=>{draftAtt[b.dataset.doneall].done=draftHw.map(h=>h.id);renderAtt()});
 }
-$("#lClass").onchange=()=>{if(!editingLesson)defaultAtt();feeHint();renderAtt()};
+$("#lClass").onchange=()=>{if(!editingLesson)defaultAtt();feeHint();renderAtt();renderCheckSelect(true)};
+$("#lDate").onchange=()=>renderCheckSelect(true);
 $("#lMode").onchange=feeHint;
 $("#allPresent").onclick=()=>{
   const c=$("#lClass").value;
   studentsArr().filter(s=>s.active!==false&&(c?inClass(s,c):draftAtt[s.id])).forEach(s=>{draftAtt[s.id]={...(draftAtt[s.id]||{}),st:"p"}});
-  renderAtt();
+  renderAtt();renderCheck();
 };
 $("#fLesson").addEventListener("submit",e=>{
   e.preventDefault();
@@ -436,11 +468,27 @@ $("#fLesson").addEventListener("submit",e=>{
   for(const [sid,r] of Object.entries(draftAtt)){
     const prevFee=same&&old.attendance&&old.attendance[sid]&&old.attendance[sid].fee;
     const fee=prevFee!=null&&prevFee!==false?prevFee:(g?groupFee(g,lmode):Number((S.students[sid]||{}).fee||0));
-    att[sid]={st:r.st,done:(r.done||[]).filter(x=>ids.has(x)),fee,cmt:(r.cmt||"").trim()};
+    att[sid]={st:r.st,done:(r.done||[]).filter(x=>ids.has(x)),checkedOn:r.checkedOn||"",fee,cmt:(r.cmt||"").trim()};
   }
   const data={date,time:$("#lTime").value.trim(),groupId:gid,className:g?g.name:"",subject:g?g.subject||"":"",mode:lmode,content:$("#lContent").value.trim(),homework:$("#lHomework").value.trim(),hwItems:draftHw.filter(h=>h.title.trim()||h.link.trim()||h.filePath).map(h=>({...h,title:h.title.trim(),link:h.link.trim()})),attendance:att,updatedAt:new Date().toISOString()};
   if(old&&old.sample)data.sample=true;
   save("lessons",editingLesson||newId(),data);
+  // Bỏ dấu "đã kiểm tra" ở buổi cũ nếu đổi sang buổi khác (hoặc đổi ngày)
+  const oldDate=old&&old.date;
+  if(checkedHere&&S.lessons[checkedHere]&&(!draftCheck||draftCheck.id!==checkedHere||oldDate!==date)){
+    const pl=S.lessons[checkedHere],pa={};
+    for(const [sid,r] of Object.entries(pl.attendance||{}))pa[sid]=r.checkedOn===oldDate?{...r,checkedOn:""}:r;
+    if(!draftCheck||draftCheck.id!==checkedHere)save("lessons",checkedHere,{...pl,attendance:pa});
+    else S.lessons[checkedHere]={...pl,attendance:pa};
+  }
+  if(draftCheck&&S.lessons[draftCheck.id]){
+    const pl=S.lessons[draftCheck.id],pa={};
+    for(const [sid,r] of Object.entries(pl.attendance||{})){
+      const here=data.attendance[sid]&&data.attendance[sid].st==="p";
+      pa[sid]=here?{...r,done:draftCheck.done[sid]||[],checkedOn:date}:r;
+    }
+    save("lessons",draftCheck.id,{...pl,attendance:pa});
+  }
   $("#dLesson").close();toast("Đã lưu buổi học");
 });
 $("#lDelete").onclick=armed($("#lDelete"),"Bấm lần nữa để xóa",()=>{removeDoc("lessons",editingLesson);$("#dLesson").close();toast("Đã xóa buổi học")});
@@ -479,8 +527,10 @@ function safeLink(u){u=(u||"").trim();if(!u)return "";if(!/^https?:\/\//i.test(u
 function hwProgress(l){
   const items=l.hwItems||[];if(!items.length)return "";
   const recs=Object.values(l.attendance||{});if(!recs.length)return "";
-  const full=recs.filter(r=>items.every(h=>(r.done||[]).includes(h.id))).length;
-  return `<span class="pill ${full===recs.length?"ok":"warn"}">${full}/${recs.length} em làm xong hết bài</span>`;
+  const chk=recs.filter(r=>r.checkedOn);if(!chk.length)return `<span class="pill">Chưa kiểm tra BTVN</span>`;
+  const full=chk.filter(r=>items.every(h=>(r.done||[]).includes(h.id))).length;
+  const days=[...new Set(chk.map(r=>dm(r.checkedOn)))].join(", ");
+  return `<span class="pill ${full===chk.length?"ok":"warn"}">Kiểm tra ngày ${days}: ${full}/${chk.length} em làm xong hết bài</span>`;
 }
 function renderHw(){
   $("#hwList").innerHTML=draftHw.length?draftHw.map((h,i)=>`<div class="hwitem">
@@ -672,7 +722,7 @@ function renderParent(){
     return `<div class="card plesson"><div class="head"><b>${WD[d.getDay()]}, ${d.getDate()}/${d.getMonth()+1}${l.time?" · "+esc(l.time):""}</b>
       <span style="display:flex;gap:6px;flex-wrap:wrap">${lessonGroupName(l)?`<span class="pill acc">${esc(lessonGroupName(l))}</span>`:""}${l.mode?`<span class="pill ${l.mode==="on"?"on":""}">${MODE[l.mode]}</span>`:""}<span class="pill ${stTxt[r.st][0]}">${stTxt[r.st][1]}</span></span></div>
       ${l.content?`<div><span class="lbl">Nội dung:</span>${esc(l.content)}</div>`:""}
-      ${items.length?`<div><span class="lbl">Bài tập về nhà:</span><ul>${items.map((it,i)=>`<li>${(r.done||[]).includes(it.id)?"✅":"⬜"} ${esc(it.title||"Bài "+(i+1))}${it.link?` · <a href="${esc(safeLink(it.link))}" target="_blank" rel="noopener">Mở link</a>`:""}${it.filePath?` · <a href="#" data-file="${esc(it.filePath)}">📄 ${esc(it.fileName||"Tệp")}</a>`:""}</li>`).join("")}</ul></div>`:""}
+      ${items.length?`<div><span class="lbl">Bài tập về nhà:</span> <span class="pill ${r.checkedOn?"ok":""}">${r.checkedOn?"Gia sư đã kiểm tra ngày "+dm(r.checkedOn):"Chưa kiểm tra"}</span><ul>${items.map((it,i)=>`<li>${r.checkedOn?((r.done||[]).includes(it.id)?"✅":"❌"):"•"} ${esc(it.title||"Bài "+(i+1))}${it.link?` · <a href="${esc(safeLink(it.link))}" target="_blank" rel="noopener">Mở link</a>`:""}${it.filePath?` · <a href="#" data-file="${esc(it.filePath)}">📄 ${esc(it.fileName||"Tệp")}</a>`:""}</li>`).join("")}</ul></div>`:""}
       ${l.homework?`<div><span class="lbl">Ghi chú:</span>${esc(l.homework)}</div>`:""}
       ${r.cmt?`<div class="cmtbox"><b>Nhận xét của gia sư:</b> ${esc(r.cmt)}</div>`:""}
     </div>`}).join("")+`</div>`:`<div class="empty"><b>Chưa có buổi học nào trong tháng này</b>Chọn tháng khác ở ô phía trên.</div>`;
