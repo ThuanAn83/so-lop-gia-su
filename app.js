@@ -38,7 +38,7 @@ let me=null;
 const PARENT_DOMAIN="@phuhuynh.solop.local";
 function normPhone(p){return String(p||"").replace(/\D/g,"").replace(/^84/,"0")}
 
-function att2model(rows){const m={};rows.forEach(a=>{m[a.student_id]={st:a.status,done:a.done||[],fee:a.fee,cmt:a.comment||""}});return m}
+function att2model(rows){const m={};rows.forEach(a=>{m[a.student_id]={st:a.status==="e"?"u":a.status,done:a.done||[],fee:a.fee,cmt:a.comment||""}});return m}
 async function loadAll(){
   const q=t=>sb.from(t).select("*");
   const res=await Promise.all([q("students"),q("groups"),q("group_members"),q("lessons"),q("attendance"),q("payments"),q("settings")]);
@@ -149,7 +149,7 @@ function renderLessons(){
       return `<div class="card lesson" tabindex="0" data-lesson="${esc(l.id)}">
         <div class="date"><small>${WD[d.getDay()]}</small><b>${d.getDate()}</b><small>Th${d.getMonth()+1}</small></div>
         <div class="body">
-          <div class="meta">${lessonGroupName(l)?`<span class="pill acc">${esc(lessonGroupName(l))}</span>`:""}${lessonSubject(l)?`<span class="pill">${esc(lessonSubject(l))}</span>`:""}${l.mode?`<span class="pill ${l.mode==="on"?"on":""}">${MODE[l.mode]}</span>`:""}${l.time?`<span class="pill">${esc(l.time)}</span>`:""}${e?`<span class="pill warn">${e} vắng có phép</span>`:""}${u?`<span class="pill bad">${u} vắng</span>`:""}</div>
+          <div class="meta">${lessonGroupName(l)?`<span class="pill acc">${esc(lessonGroupName(l))}</span>`:""}${lessonSubject(l)?`<span class="pill">${esc(lessonSubject(l))}</span>`:""}${l.mode?`<span class="pill ${l.mode==="on"?"on":""}">${MODE[l.mode]}</span>`:""}${l.time?`<span class="pill">${esc(l.time)}</span>`:""}${u?`<span class="pill bad">${u} vắng</span>`:""}</div>
           ${l.content?`<p class="clamp"><span class="lbl">Nội dung:</span>${esc(l.content)}</p>`:""}
           ${(l.hwItems||[]).length?`<p class="clamp"><span class="lbl">BTVN:</span>${(l.hwItems||[]).map((h,i)=>esc((i+1)+". "+(h.title||"Bài "+(i+1)))+(h.link||h.filePath?" 📎":"")).join("  ·  ")}</p>`:""}
           ${l.homework?`<p class="clamp"><span class="lbl">${(l.hwItems||[]).length?"Ghi chú:":"BTVN:"}</span>${esc(l.homework)}</p>`:""}
@@ -245,7 +245,7 @@ function renderFees(){
   const rows=studentsArr().map(s=>({s,f:feeFor(s.id,m),pay:S.payments[s.id+"_"+m]})).filter(r=>r.f.p+r.f.e+r.f.u>0||(r.s.active!==false));
   let due=0,paid=0;rows.forEach(r=>{due+=r.f.total;if(r.pay&&r.pay.paid)paid+=r.f.total});
   let h=`<div class="bar"><div class="left"><h2>Học phí</h2>${feeToggle()}<input type="month" id="feeMonth" value="${m}" style="width:auto"></div>
-    <label class="check"><input type="checkbox" id="chargeU" ${S.settings.chargeUnexcused?"checked":""}> Tính tiền cả buổi vắng không phép</label></div>
+    <label class="check"><input type="checkbox" id="chargeU" ${S.settings.chargeUnexcused?"checked":""}> Tính tiền cả buổi vắng</label></div>
     <div class="kpis">
       <div class="kpi"><small>Phải thu ${monthLabel(m).toLowerCase()}</small><b>${money(due)}</b></div>
       <div class="kpi"><small>Đã thu</small><b style="color:var(--ok)">${money(paid)}</b></div>
@@ -253,15 +253,15 @@ function renderFees(){
     </div>
     <div class="card bankcard">${bankLine()}<button type="button" class="small" id="bankEdit">${S.settings.accNo?"Sửa tài khoản":"+ Nhập tài khoản ngân hàng"}</button></div>`;
   if(!rows.length)h+=`<div class="empty"><b>Chưa có dữ liệu học phí</b>Học phí được tính tự động từ điểm danh: số buổi có mặt × học phí mỗi buổi.</div>`;
-  else h+=`<div class="tablewrap"><table><thead><tr><th>Học sinh</th><th class="n">Có mặt</th><th class="n">Vắng phép</th><th class="n">Vắng</th><th class="n">Chi tiết</th><th class="n">Thành tiền</th><th>Đã thu?</th><th></th></tr></thead><tbody>`+
+  else h+=`<div class="tablewrap"><table><thead><tr><th>Học sinh</th><th class="n">Có mặt</th><th class="n">Vắng</th><th class="n">Chi tiết</th><th class="n">Thành tiền</th><th>Đã thu?</th><th></th></tr></thead><tbody>`+
     rows.map(r=>`<tr>
       <td><b>${esc(r.s.name)}</b>${groupsOf(r.s.id).length?`<br><span class="status">${groupsOf(r.s.id).map(g=>esc(g.name)).join(", ")}</span>`:""}</td>
-      <td class="n">${r.f.p}</td><td class="n">${r.f.e}</td><td class="n">${r.f.u}</td>
+      <td class="n">${r.f.p}</td><td class="n">${r.f.u}</td>
       <td class="n status" style="white-space:nowrap">${itemsShort(r.f)||"–"}</td><td class="n"><b>${money(r.f.total)}</b></td>
       <td>${r.f.total>0?`<label class="check"><input type="checkbox" data-pay="${esc(r.s.id)}" ${r.pay&&r.pay.paid?"checked":""}> ${r.pay&&r.pay.paid?`<span class="pill ok">Đã thu${r.pay.paidDate?" "+esc(r.pay.paidDate.split("-").reverse().slice(0,2).join("/")):""}</span>`:`<span class="pill warn">Chưa thu</span>`}</label>`:`<span class="status">Không có</span>`}</td>
       <td>${r.f.total>0?`<button type="button" class="small" data-msg="${esc(r.s.id)}">Mã QR & tin nhắn</button>`:""}</td>
-    </tr>`).join("")+`</tbody><tfoot><tr><td>Tổng cộng</td><td class="n">${rows.reduce((a,r)=>a+r.f.p,0)}</td><td class="n">${rows.reduce((a,r)=>a+r.f.e,0)}</td><td class="n">${rows.reduce((a,r)=>a+r.f.u,0)}</td><td></td><td class="n">${money(due)}</td><td colspan="2"></td></tr></tfoot></table></div>
-    <p class="hint" style="margin-top:10px">Học phí = số buổi có mặt × học phí mỗi buổi của lớp (offline hoặc online)${S.settings.chargeUnexcused?" (cộng cả buổi vắng không phép)":""}. Buổi vắng có phép không tính tiền.</p>`;
+    </tr>`).join("")+`</tbody><tfoot><tr><td>Tổng cộng</td><td class="n">${rows.reduce((a,r)=>a+r.f.p,0)}</td><td class="n">${rows.reduce((a,r)=>a+r.f.u,0)}</td><td></td><td class="n">${money(due)}</td><td colspan="2"></td></tr></tfoot></table></div>
+    <p class="hint" style="margin-top:10px">Học phí = số buổi có mặt × học phí mỗi buổi của lớp (offline hoặc online)${S.settings.chargeUnexcused?" (cộng cả buổi vắng)":". Buổi vắng không tính tiền"}.</p>`;
   $("#view").innerHTML=h;
   $("#feeMonth").onchange=e=>{if(e.target.value){feeMonth=e.target.value;render()}};
   $("#chargeU").onchange=e=>save("settings","main",{...S.settings,chargeUnexcused:e.target.checked});
@@ -326,10 +326,10 @@ function renderAttendance(){
     <button type="button" class="primary" id="attAdd">+ Điểm danh buổi mới</button></div>`;
   if(!ls.length||!stu.length){h+=`<div class="empty"><b>Chưa có buổi học nào trong ${monthLabel(attMonth).toLowerCase()}</b>Bấm “Điểm danh buổi mới” để ghi buổi học và điểm danh.</div>`}
   else{
-    h+=`<div class="tablewrap"><table class="grid"><thead><tr><th>Học sinh</th>${ls.map(l=>{const d=new Date(l.date+"T00:00:00");return `<th class="d" data-lesson="${esc(l.id)}" title="Mở buổi học: ${esc(lessonGroupName(l))}">${WD[d.getDay()]}<br>${d.getDate()}/${d.getMonth()+1}${l.mode?`<br><span class="pill ${l.mode==="on"?"on":""}" style="padding:0 6px;font-size:.68rem">${l.mode==="on"?"On":"Off"}</span>`:""}</th>`}).join("")}<th>Có mặt</th><th>Phép</th><th>Vắng</th><th>Học phí</th></tr></thead><tbody>`+
-    stu.map(s=>{const f=feeFor(s.id,attMonth,attClass);return `<tr><td><b>${esc(s.name)}</b></td>${ls.map(l=>{const r=(l.attendance||{})[s.id];return `<td><span class="cell ${r?r.st:"n"}">${r?sym[r.st]:"·"}</span></td>`}).join("")}<td><b>${f.p}</b></td><td>${f.e}</td><td>${f.u}</td><td style="white-space:nowrap"><b>${money(f.total)}</b></td></tr>`}).join("")+
+    h+=`<div class="tablewrap"><table class="grid"><thead><tr><th>Học sinh</th>${ls.map(l=>{const d=new Date(l.date+"T00:00:00");return `<th class="d" data-lesson="${esc(l.id)}" title="Mở buổi học: ${esc(lessonGroupName(l))}">${WD[d.getDay()]}<br>${d.getDate()}/${d.getMonth()+1}${l.mode?`<br><span class="pill ${l.mode==="on"?"on":""}" style="padding:0 6px;font-size:.68rem">${l.mode==="on"?"On":"Off"}</span>`:""}</th>`}).join("")}<th>Có mặt</th><th>Vắng</th><th>Học phí</th></tr></thead><tbody>`+
+    stu.map(s=>{const f=feeFor(s.id,attMonth,attClass);return `<tr><td><b>${esc(s.name)}</b></td>${ls.map(l=>{const r=(l.attendance||{})[s.id];return `<td><span class="cell ${r?r.st:"n"}">${r?sym[r.st]:"·"}</span></td>`}).join("")}<td><b>${f.p}</b></td><td>${f.u}</td><td style="white-space:nowrap"><b>${money(f.total)}</b></td></tr>`}).join("")+
     `</tbody></table></div>
-    <div class="legend"><span><span class="cell p">✓</span>Có mặt</span><span><span class="cell e">P</span>Vắng có phép</span><span><span class="cell u">V</span>Vắng không phép</span><span><span class="cell n">·</span>Không học buổi này</span><span>Bấm vào ngày để sửa buổi học</span></div>`;
+    <div class="legend"><span><span class="cell p">✓</span>Có mặt</span><span><span class="cell u">V</span>Vắng</span><span><span class="cell n">·</span>Không học buổi này</span><span>Bấm vào ngày để sửa buổi học</span></div>`;
   }
   $("#view").innerHTML=h;
   $("#attMonth").onchange=e=>{if(e.target.value){attMonth=e.target.value;render()}};
@@ -399,7 +399,7 @@ function feeHint(){
 function renderAtt(){
   const c=$("#lClass").value;
   const list=studentsArr().filter(s=>draftAtt[s.id]||(s.active!==false&&inClass(s,c)));
-  const opts=[["p","Có mặt"],["e","Phép"],["u","Vắng"],["n","—"]];
+  const opts=[["p","Có mặt"],["u","Vắng"],["n","—"]];
   $("#attList").innerHTML=list.length?list.map(s=>{
     const r=draftAtt[s.id];const st=r?r.st:"n";
     return `<div class="att-row"><div class="who">${esc(s.name)}<small>${esc(groupsOf(s.id).map(g=>g.name).join(", "))}</small></div>
@@ -572,8 +572,7 @@ function openMsg(sid,m){
   const buoi=f.p+(S.settings.chargeUnexcused?f.u:0);
   let t=`Chào ${s.parentName||"phụ huynh"}, em gửi thông báo học phí tháng ${Number(mo)}/${y} của em ${s.name}:\n`;
   t+=`- Số buổi học: ${f.p} buổi`;
-  if(f.e)t+=`\n- Vắng có phép: ${f.e} buổi (không tính phí)`;
-  if(f.u)t+=`\n- Vắng không phép: ${f.u} buổi${S.settings.chargeUnexcused?" (có tính phí)":" (không tính phí)"}`;
+  if(f.u)t+=`\n- Vắng: ${f.u} buổi${S.settings.chargeUnexcused?" (có tính phí)":" (không tính phí)"}`;
   f.items.forEach(i=>{t+=`\n- ${i.label}: ${i.n} buổi × ${money(i.fee)} = ${money(i.n*i.fee)}`});
   t+=`\n- Tổng học phí: ${money(f.total)}`;
   const st=S.settings;lastQR=null;
@@ -659,7 +658,7 @@ function renderParent(){
   const stTxt={p:["ok","Có mặt"],e:["warn","Vắng có phép"],u:["bad","Vắng"]};
   let h=(kids.length>1?`<div class="child-tabs">${kids.map(k=>`<button type="button" class="${k.id===pKid?"primary":""}" data-kid="${esc(k.id)}">${esc(k.name)}</button>`).join("")}</div>`:"")+
   `<div class="hero"><div><h2>${esc(s.name)}</h2><p class="hint">${groupsOf(pKid).map(g=>esc(g.name)).join(", ")||"Theo dõi việc học của con"}</p></div><input type="month" id="pMonth" value="${m}" style="width:auto"></div>
-  <div class="kpis"><div class="kpi"><small>Buổi có mặt</small><b>${f.p}</b></div><div class="kpi"><small>Vắng</small><b>${f.e+f.u}</b></div>
+  <div class="kpis"><div class="kpi"><small>Buổi có mặt</small><b>${f.p}</b></div><div class="kpi"><small>Vắng</small><b>${f.u}</b></div>
   <div class="kpi"><small>Học phí ${monthLabel(m).toLowerCase()}</small><b>${money(f.total)}</b>${f.total>0?(pay&&pay.paid?`<span class="pill ok">Đã đóng</span>`:`<span class="pill warn">Chưa đóng</span>`):""}</div></div>`;
   if(f.total>0&&!(pay&&pay.paid)){
     const q=qrFor(st,s,pKid,m,f.total);
